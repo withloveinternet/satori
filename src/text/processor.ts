@@ -2,9 +2,6 @@ import { Locale } from '../language.js'
 import { isNumber, segment, splitByBreakOpportunities } from '../utils.js'
 import { HorizontalEllipsis, Space } from './characters.js'
 import { SerializedStyle } from '../handler/expand.js'
-import bidiFactory from 'bidi-js'
-
-const bidi = bidiFactory()
 
 export function preprocess(
   content: string,
@@ -20,8 +17,6 @@ export function preprocess(
   lineLimit: number
   blockEllipsis: string
 } {
-  content = processBidirectionalText(content);
-  
   const { textTransform, whiteSpace, wordBreak } = style
 
   content = processTextTransform(content, textTransform, locale)
@@ -181,30 +176,3 @@ function parseLineClamp(input: number | string): [number?, string?] {
 
   return []
 }
-/**
- * Apply bidirectional algorithm to reorder characters for proper display
- * This handles mixed LTR/RTL text like Latin with embedded Hebrew or Arabic
- */
-export function processBidirectionalText(text: string): string {
-  // Early return for empty or trivial strings
-  if (!text || text.length <= 1) return text;
-  
-  try {
-    // First get the embedding levels
-    const embeddingLevels = bidi.getEmbeddingLevels(text);
-    
-    // Then get the reordering indices with the embedding levels result
-    const indices = bidi.getReorderedIndices(text, embeddingLevels);
-    
-    // If the indices are in normal order, no change needed
-    if (indices.every((val, idx) => val === idx)) return text;
-    
-    // Reorder the characters based on the indices
-    return indices.map(i => text.charAt(i)).join('');
-  } catch (e) {
-    // If anything fails, return the original text
-    console.error('Error in bidirectional text processing:', e);
-    return text;
-  }
-}
-
