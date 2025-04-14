@@ -246,7 +246,7 @@ export async function resolveImageData(
     .then((data) => {
       if (typeof data === 'string') {
         try {
-          const newSrc = `data:image/svg+xml;base64,${btoa(data)}`
+          const newSrc = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(data)))}`
           // Parse the SVG image size
           const imageSize = parseSvgImageSize(url, data)
           return [newSrc, ...imageSize] as ResolvedImageData
