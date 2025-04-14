@@ -1,12 +1,12 @@
 import React from 'react'
-import satori from 'satori'
+import satori from '@openbook/satori'
 import { LiveProvider, LiveContext, withLive } from 'react-live'
 import { useEffect, useState, useRef, useContext, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import Editor, { useMonaco } from '@monaco-editor/react'
 import toast, { Toaster } from 'react-hot-toast'
 import copy from 'copy-to-clipboard'
-import packageJson from 'satori/package.json'
+import packageJson from '@openbook/satori/package.json'
 import * as fflate from 'fflate'
 import { Base64 } from 'js-base64'
 import PDFDocument from 'pdfkit/js/pdfkit.standalone'
@@ -20,7 +20,7 @@ import Introduction from '../components/introduction'
 import PanelResizeHandle from '../components/panel-resize-handle'
 import { languageFontMap } from '../utils/font'
 
-import playgroundTabs, { Tabs } from '../cards/playground-data'
+import playgroundTabs, { type Tabs } from '../cards/playground-data'
 import previewTabs from '../cards/preview-tabs'
 
 const cardNames = Object.keys(playgroundTabs)
@@ -264,6 +264,7 @@ function LiveEditor({ id }: { id: string }) {
   const { onChange } = useContext(LiveContext) as unknown as {
     onChange: (val: string) => void
   }
+  const [useSimpleEditor, setUseSimpleEditor] = useState(false)
 
   const monaco = useMonaco()
   useEffect(() => {
@@ -363,45 +364,84 @@ function LiveEditor({ id }: { id: string }) {
 
   return (
     <div ref={ref} style={{ height: '100%', position: 'relative' }}>
-      <div style={{ position: 'absolute' }}>
-        <Editor
-          height='100%'
-          theme='IDLE'
-          defaultLanguage='javascript'
-          value={editedCards[id]}
-          onChange={(newCode) => {
-            // We also update the code in memory so switching tabs will preserve the
-            // edited code (until refreshing).
-            editedCards[id] = newCode ?? ''
-            onChange(newCode ?? '')
+      <div style={{ position: 'absolute', right: '10px', top: '10px', zIndex: 10 }}>
+        <button 
+          onClick={() => setUseSimpleEditor(!useSimpleEditor)}
+          style={{ 
+            padding: '4px 8px', 
+            background: '#f0f0f0', 
+            border: '1px solid #ccc',
+            borderRadius: '4px',
+            cursor: 'pointer'
           }}
-          onMount={async (editor, _monaco) => {
-            if (ref.current) {
-              const relayout = ([e]: any) => {
-                editor.layout({
-                  width: e.borderBoxSize[0].inlineSize,
-                  height: e.borderBoxSize[0].blockSize,
-                })
-              }
-              const resizeObserver = new ResizeObserver(relayout)
-              resizeObserver.observe(ref.current)
-            }
-          }}
-          options={{
-            fontFamily: 'iaw-mono-var',
-            fontSize: 14,
-            wordWrap: 'on',
-            tabSize: 2,
-            minimap: {
-              enabled: false,
-            },
-            smoothScrolling: true,
-            cursorSmoothCaretAnimation: 'on',
-            contextmenu: false,
-            automaticLayout: true,
-          }}
-        />
+        >
+          {useSimpleEditor ? 'Use Monaco Editor' : 'Use Simple Editor'}
+        </button>
       </div>
+      
+      {useSimpleEditor ? (
+        <textarea
+          style={{
+            width: '100%',
+            height: '100%',
+            fontFamily: 'iaw-mono-var, monospace',
+            fontSize: '14px',
+            padding: '16px',
+            border: 'none',
+            outline: 'none',
+            resize: 'none',
+            tabSize: '2',
+            lineHeight: '1.5'
+          }}
+          value={editedCards[id]}
+          onChange={(e) => {
+            const newCode = e.target.value;
+            editedCards[id] = newCode;
+            onChange(newCode);
+          }}
+          spellCheck="false"
+        />
+      ) : (
+        <div style={{ position: 'absolute', width: '100%', height: '100%' }}>
+          <Editor
+            height='100%'
+            theme='IDLE'
+            defaultLanguage='javascript'
+            value={editedCards[id]}
+            onChange={(newCode) => {
+              // We also update the code in memory so switching tabs will preserve the
+              // edited code (until refreshing).
+              editedCards[id] = newCode ?? ''
+              onChange(newCode ?? '')
+            }}
+            onMount={async (editor, _monaco) => {
+              if (ref.current) {
+                const relayout = ([e]: any) => {
+                  editor.layout({
+                    width: e.borderBoxSize[0].inlineSize,
+                    height: e.borderBoxSize[0].blockSize,
+                  })
+                }
+                const resizeObserver = new ResizeObserver(relayout)
+                resizeObserver.observe(ref.current)
+              }
+            }}
+            options={{
+              fontFamily: 'iaw-mono-var',
+              fontSize: 14,
+              wordWrap: 'on',
+              tabSize: 2,
+              minimap: {
+                enabled: false,
+              },
+              smoothScrolling: true,
+              cursorSmoothCaretAnimation: 'on',
+              contextmenu: false,
+              automaticLayout: true,
+            }}
+          />
+        </div>
+      )}
     </div>
   )
 }
@@ -415,7 +455,7 @@ const LiveSatori = withLive(function ({
 }: {
   live?: { element: React.ComponentType; error: string }
 }) {
-  const [options, setOptions] = useState<object | null>(null)
+  const [options, setOptions] = useState<{fonts?: any[]} | null>(null)
   const [debug, setDebug] = useState(false)
   const [fontEmbed, setFontEmbed] = useState(true)
   const [emojiType, setEmojiType] = useState('twemoji')
@@ -554,6 +594,7 @@ const LiveSatori = withLive(function ({
           try {
             _result = await satori(live.element.prototype.render(), {
               ...options,
+              fonts: options?.fonts || [],
               embedFont: fontEmbed,
               width,
               height,
