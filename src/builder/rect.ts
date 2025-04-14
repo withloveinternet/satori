@@ -186,6 +186,10 @@ export default async function rect(
 
   // If it's an image (<img>) tag, we add an extra layer of the image itself.
   if (isImage) {
+    // Determine the correct preserveAspectRatio setting based on objectPosition
+    let aspectRatioHorizontal = 'xMid'; // Default is center
+    let aspectRatioVertical = 'YMid'; // Default is center
+
     // We need to subtract the border and padding sizes from the image size.
     const offsetLeft =
       ((style.borderLeftWidth as number) || 0) +
@@ -200,11 +204,28 @@ export default async function rect(
       ((style.borderBottomWidth as number) || 0) +
       ((style.paddingBottom as number) || 0)
 
+    if(typeof style.objectPosition === 'string') {
+      // Parse the objectPosition style property
+      const [horizontalPosition, verticalPosition] = (style.objectPosition || 'left center').split(' ');
+
+      if (horizontalPosition === 'left') {
+        aspectRatioHorizontal = 'xMin';
+      } else if (horizontalPosition === 'right') {
+        aspectRatioHorizontal = 'xMax';
+      }
+    
+      if (verticalPosition === 'top') {
+        aspectRatioVertical = 'YMin';
+      } else if (verticalPosition === 'bottom') {
+        aspectRatioVertical = 'YMax';
+      }
+    }
+
     const preserveAspectRatio =
       style.objectFit === 'contain'
-        ? 'xMidYMid'
+        ? `${aspectRatioHorizontal}${aspectRatioVertical}`
         : style.objectFit === 'cover'
-        ? 'xMidYMid slice'
+        ? `${aspectRatioHorizontal}${aspectRatioVertical} slice`
         : 'none'
 
     shape += buildXMLString('image', {
@@ -216,8 +237,21 @@ export default async function rect(
       preserveAspectRatio,
       transform: matrix ? matrix : undefined,
       style: cssFilter ? `filter:${cssFilter}` : undefined,
-      'clip-path': `url(#satori_cp-${id})`,
-      mask: miId ? `url(#${miId})` : `url(#satori_om-${id})`,
+      ...(
+        style.borderBottomLeftRadius || 
+        style.borderBottomRightRadius ||
+        style.borderTopLeftRadius ||
+        style.borderTopRightRadius ||
+        style.borderRightWidth || 
+        style.borderBottomWidth || 
+        style.borderLeftWidth || 
+        style.borderTopWidth
+      ) && {
+        'clip-path': `url(#satori_cp-${id})`,
+      },
+      ...(style.maskImage) && {
+        mask: miId ? `url(#${miId})` : `url(#satori_om-${id})`
+      }
     })
   }
 

@@ -77,6 +77,8 @@ export default function buildText(
   },
   style: Record<string, number | string>
 ) {
+  // The content has already been processed by the bidirectional algorithm in the flow function
+  
   let extra = ''
   if (debug) {
     extra = buildXMLString('rect', {
@@ -133,6 +135,7 @@ export default function buildText(
     'clip-path': clipPathId ? `url(#${clipPathId})` : undefined,
     style: style.filter ? `filter:${style.filter}` : undefined,
   }
+
   return [
     (filter ? `${filter}<g filter="url(#satori_s-${id})">` : '') +
       buildXMLString(

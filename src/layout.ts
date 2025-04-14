@@ -83,7 +83,7 @@ export default async function* layout(
     let iter: ReturnType<typeof layout>
 
     if (!isReactElement(element)) {
-      // Process as text node.
+      // Process as text node.      
       iter = buildTextNodes(String(element), context)
       yield (await iter.next()).value as { word: string; locale?: Locale }[]
     } else {

@@ -21,6 +21,7 @@ import { Locale } from '../language.js'
 import { HorizontalEllipsis, Space, Tab } from './characters.js'
 import { genMeasurer } from './measurer.js'
 import { preprocess } from './processor.js'
+import { FontEngine } from 'src/font.js'
 
 const skippedWordWhenFindingMissingFont = new Set([Tab])
 
@@ -52,6 +53,8 @@ export default async function* buildTextNodes(
     textAlign,
     lineHeight,
     textWrap,
+    textFit,
+    maxFontSize,
     fontSize,
     filter: cssFilter,
     tabSize = 8,
@@ -107,20 +110,14 @@ export default async function* buildTextNodes(
 
   const { measureGrapheme, measureGraphemeArray, measureText } = genMeasurer(
     engine,
-    isImage,
-    {
-      fontSize,
-      letterSpacing,
-    }
+    isImage
   )
-
-  const tabWidth = isString(tabSize)
-    ? lengthToNumber(tabSize, fontSize, 1, parentStyle)
-    : measureGrapheme(Space) * tabSize
 
   const calc = (
     text: string,
-    currentWidth: number
+    currentWidth: number,
+    fontSize: number, // Added fontSize parameter
+    letterSpacing: number, // Added letterSpacing parameter
   ): {
     originWidth: number
     endingSpacesWidth: number
@@ -134,6 +131,11 @@ export default async function* buildTextNodes(
       }
     }
 
+    // Calculate the tabWidth inside the calc function
+    const tabWidth = isString(tabSize)
+    ? lengthToNumber(tabSize, fontSize, 1, parentStyle)
+    : measureText(Space.repeat(tabSize), fontSize, letterSpacing) / tabSize;
+
     const { index, tabCount } = detectTabs(text)
 
     let originWidth = 0
@@ -141,19 +143,19 @@ export default async function* buildTextNodes(
     if (tabCount > 0) {
       const textBeforeTab = text.slice(0, index)
       const textAfterTab = text.slice(index + tabCount)
-      const textWidthBeforeTab = measureText(textBeforeTab)
+      const textWidthBeforeTab = measureText(textBeforeTab, fontSize, letterSpacing)
       const offsetBeforeTab = textWidthBeforeTab + currentWidth
       const tabMoveDistance =
         tabWidth === 0
           ? textWidthBeforeTab
           : (Math.floor(offsetBeforeTab / tabWidth) + tabCount) * tabWidth
-      originWidth = tabMoveDistance + measureText(textAfterTab)
+      originWidth = tabMoveDistance + measureText(textAfterTab, fontSize, letterSpacing)
     } else {
-      originWidth = measureText(text)
+      originWidth = measureText(text, fontSize, letterSpacing)
     }
 
     const afterTrimEndWidth =
-      text.trimEnd() === text ? originWidth : measureText(text.trimEnd())
+      text.trimEnd() === text ? originWidth : measureText(text.trimEnd(), fontSize, letterSpacing)
 
     return {
       originWidth,
@@ -178,7 +180,7 @@ export default async function* buildTextNodes(
   })[] = []
 
   // With the given container width, compute the text layout.
-  function flow(width: number) {
+  function flow(width: number, fontSize: number, letterSpacing: number, useEngine: FontEngine) {
     let lines = 0
     let maxWidth = 0
     let lineIndex = -1
@@ -187,6 +189,7 @@ export default async function* buildTextNodes(
     let currentLineHeight = 0
     let currentBaselineOffset = 0
 
+    baselines = []
     lineWidths = []
     lineSegmentNumber = [0]
     texts = []
@@ -207,7 +210,7 @@ export default async function* buildTextNodes(
         originWidth,
         endingSpacesWidth,
         text: _word,
-      } = calc(word, currentWidth)
+      } = calc(word, currentWidth, fontSize, letterSpacing)
       word = _word
 
       w = originWidth
@@ -274,8 +277,8 @@ export default async function* buildTextNodes(
         lines++
         height += currentLineHeight
         currentWidth = w
-        currentLineHeight = w ? engine.height(word) : 0
-        currentBaselineOffset = w ? engine.baseline(word) : 0
+        currentLineHeight = w ? useEngine.height(word) : 0
+        currentBaselineOffset = w ? useEngine.baseline(word) : 0
         lineSegmentNumber.push(1)
         lineIndex = -1
 
@@ -288,11 +291,11 @@ export default async function* buildTextNodes(
       } else {
         // It fits into the current line.
         currentWidth += w
-        const glyphHeight = engine.height(word)
+        const glyphHeight = useEngine.height(word)
         if (glyphHeight > currentLineHeight) {
           // Use the baseline of the highest segment as the baseline of the line.
           currentLineHeight = glyphHeight
-          currentBaselineOffset = engine.baseline(word)
+          currentBaselineOffset = useEngine.baseline(word)
         }
         if (allowedToJustify) {
           lineSegmentNumber[lineSegmentNumber.length - 1]++
@@ -328,7 +331,7 @@ export default async function* buildTextNodes(
             _width = fontSize
             _isImage = true
           } else {
-            _width = measureGrapheme(_text)
+            _width = measureGrapheme(_text, fontSize, letterSpacing)
           }
 
           texts.push(_text)
@@ -365,9 +368,44 @@ export default async function* buildTextNodes(
   // It's possible that the text's measured size is different from the container's
   // size, because the container might have a fixed width or height or being
   // expanded by its parent.
+  let finalFontSize = fontSize;
   let measuredTextSize = { width: 0, height: 0 }
-  textContainer.setMeasureFunc((containerWidth) => {
-    const { width, height } = flow(containerWidth)
+  textContainer.setMeasureFunc((containerWidth, _, containerHeight) => {
+    let width;
+    let height;
+
+    if(textFit === 'multiline') {
+      let testMinFontSize = 10; // Minimum font size to consider
+      let testMaxFontSize = maxFontSize || 120; // Maximum font size to consider
+      let bestFitFontSize = testMinFontSize;
+    
+      while (testMinFontSize <= testMaxFontSize) {
+        let testFontSize = Math.floor((testMinFontSize + testMaxFontSize) / 2);
+        const useEngine = font.getEngine(testFontSize, lineHeight, parentStyle, locale);
+        const { width: _currentWidth, height: currentHeight } = flow(containerWidth, testFontSize, letterSpacing, useEngine);
+    
+        if (currentHeight <= containerHeight) {
+          bestFitFontSize = testFontSize; // Update the best fitting font size
+          testMinFontSize = testFontSize + 1; // Try to see if a larger font size will still fit
+        } else {
+          testMaxFontSize = testFontSize - 1; // Decrease the maximum font size to try a smaller size
+        }
+      }
+    
+      finalFontSize = bestFitFontSize;
+      // Now you need to get the measurements for the final font size
+      const finalEngine = font.getEngine(finalFontSize, lineHeight, parentStyle, locale);
+      const { width: finalWidth, height: finalHeight } = flow(containerWidth, finalFontSize, letterSpacing, finalEngine);
+      width = finalWidth;
+      height = finalHeight;
+      engine = finalEngine; // Make sure you update the engine with the final font size
+    } else {
+      const useEngine = font.getEngine(finalFontSize, lineHeight, parentStyle, locale)
+      const { width: currentWidth, height: currentHeight } = flow(containerWidth, finalFontSize, letterSpacing, useEngine)
+      width = currentWidth;
+      height = currentHeight;
+      engine = useEngine;
+    }
 
     // When doing `text-wrap: balance`, we reflow the text multiple times
     // using binary search to find the best width.
@@ -378,14 +416,14 @@ export default async function* buildTextNodes(
       let m: number = width
       while (l + 1 < r) {
         m = (l + r) / 2
-        const { height: mHeight } = flow(m)
+        const { height: mHeight } = flow(m, finalFontSize, letterSpacing, engine)
         if (mHeight > height) {
           l = m
         } else {
           r = m
         }
       }
-      flow(r)
+      flow(r, finalFontSize, letterSpacing, engine)
       const _width = Math.ceil(r)
       measuredTextSize = { width: _width, height }
       return { width: _width, height }
@@ -525,12 +563,12 @@ export default async function* buildTextNodes(
 
     if (lineLimit !== Infinity) {
       let _blockEllipsis = blockEllipsis
-      let ellipsisWidth = measureGrapheme(blockEllipsis)
+      let ellipsisWidth = measureGrapheme(blockEllipsis, finalFontSize, letterSpacing)
       if (ellipsisWidth > parentContainerInnerWidth) {
         _blockEllipsis = HorizontalEllipsis
-        ellipsisWidth = measureGrapheme(_blockEllipsis)
+        ellipsisWidth = measureGrapheme(_blockEllipsis, finalFontSize, letterSpacing)
       }
-      const spaceWidth = measureGrapheme(Space)
+      const spaceWidth = measureGrapheme(Space, finalFontSize, letterSpacing)
       const isNotLastLine = line < lineWidths.length - 1
       const isLastAllowedLine = line + 1 === lineLimit
 
@@ -541,7 +579,7 @@ export default async function* buildTextNodes(
         let resolvedWidth = 0
 
         for (const char of chars) {
-          const w = baseWidth + measureGraphemeArray([subset + char])
+          const w = baseWidth + measureGraphemeArray([subset + char], finalFontSize, letterSpacing)
           if (
             // Keep at least one character:
             // > The first character or atomic inline-level element on a line
@@ -629,7 +667,7 @@ export default async function* buildTextNodes(
       const finalizedWidth = layout.width + leftOffset - finalizedLeftOffset
 
       path = engine.getSVG(finalizedSegment.replace(/(\t)+/g, ''), {
-        fontSize,
+        fontSize: finalFontSize,
         left: left + finalizedLeftOffset,
         // Since we need to pass the baseline position, add the ascender to the top.
         top: top + topOffset + baselineOfWord + baselineDelta,

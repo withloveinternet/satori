@@ -1,54 +1,49 @@
-import { FontEngine } from '../font.js'
-import { segment } from '../utils.js'
+import { FontEngine } from '../font.js';
+import { segment } from '../utils.js';
 
 export function genMeasurer(
   engine: FontEngine,
-  isImage: (grapheme: string) => boolean,
-  style: {
-    fontSize: number
-    letterSpacing: number
-  }
+  isImage: (grapheme: string) => boolean
 ): {
-  measureGrapheme: (grapheme: string) => number
-  measureGraphemeArray: (graphemes: string[]) => number
-  measureText: (text: string) => number
+  measureGrapheme: (grapheme: string, fontSize: number, letterSpacing: number) => number;
+  measureGraphemeArray: (graphemes: string[], fontSize: number, letterSpacing: number) => number;
+  measureText: (text: string, fontSize: number, letterSpacing: number) => number;
 } {
-  const { fontSize, letterSpacing } = style
+  const cache = new Map<string, number>();
 
-  const cache = new Map<string, number>()
-
-  function measureGrapheme(grapheme: string): number {
-    if (cache.has(grapheme)) {
-      return cache.get(grapheme)
+  function measureGrapheme(grapheme: string, fontSize: number, letterSpacing: number): number {
+    const cacheKey = `${grapheme}-${fontSize}-${letterSpacing}`;
+    if (cache.has(cacheKey)) {
+      return cache.get(cacheKey);
     }
 
-    const width = engine.measure(grapheme, { fontSize, letterSpacing })
-    cache.set(grapheme, width)
+    const width = engine.measure(grapheme, { fontSize, letterSpacing });
+    cache.set(cacheKey, width);
 
-    return width
+    return width;
   }
 
-  function measureGraphemeArray(graphemes: string[]): number {
-    let width = 0
+  function measureGraphemeArray(graphemes: string[], fontSize: number, letterSpacing: number): number {
+    let width = 0;
 
     for (const grapheme of graphemes) {
       if (isImage(grapheme)) {
-        width += fontSize
+        width += fontSize;
       } else {
-        width += measureGrapheme(grapheme)
+        width += measureGrapheme(grapheme, fontSize, letterSpacing);
       }
     }
 
-    return width
+    return width;
   }
 
-  function measureText(text: string): number {
-    return measureGraphemeArray(segment(text, 'grapheme'))
+  function measureText(text: string, fontSize: number, letterSpacing: number): number {
+    return measureGraphemeArray(segment(text, 'grapheme'), fontSize, letterSpacing);
   }
 
   return {
     measureGrapheme,
     measureGraphemeArray,
     measureText,
-  }
+  };
 }

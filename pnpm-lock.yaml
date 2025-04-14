@@ -11,6 +11,9 @@ importers:
       '@shuding/opentype.js':
         specifier: 1.4.0-beta.0
         version: 1.4.0-beta.0
+      bidi-js:
+        specifier: ^1.0.3
+        version: 1.0.3
       css-background-parser:
         specifier: ^0.1.0
         version: 0.1.0
@@ -120,6 +123,9 @@ importers:
       '@monaco-editor/react':
         specifier: ^4.4.5
         version: 4.5.1(monaco-editor@0.43.0)(react-dom@17.0.2)(react@17.0.2)
+      '@openbook/satori':
+        specifier: workspace:*
+        version: link:..
       '@resvg/resvg-wasm':
         specifier: ^2.3.1
         version: 2.4.1
@@ -159,9 +165,6 @@ importers:
       react-resizable-panels:
         specifier: ^0.0.30
         version: 0.0.30(react-dom@17.0.2)(react@17.0.2)
-      satori:
-        specifier: workspace:*
-        version: link:..
       svg-to-pdfkit:
         specifier: ^0.1.8
         version: 0.1.8
@@ -3727,6 +3730,12 @@ packages:
 
   /base64-js@1.5.1:
     resolution: {integrity: sha512-AKpaYlHn8t4SVbOHCy+b5+KKgvR4vrsD8vbvrbiQJps7fKDTkjkDry6ji0rUJjC0kzbNePLwzxq8iypo41qeWA==}
+
+  /bidi-js@1.0.3:
+    resolution: {integrity: sha512-RKshQI1R3YQ+n9YJz2QQ147P66ELpa1FQEg20Dk8oW9t2KgLbpDLLp9aGZ7y8WHSshDknG0bknqGw5/tyCs5tw==}
+    dependencies:
+      require-from-string: 2.0.2
+    dev: false
 
   /binary-extensions@2.2.0:
     resolution: {integrity: sha512-jDctJ/IVQbZoJykoeHbhXpOlNBqGNcwXJKJog42E5HDPUwQTSdjCHdihjj0DlnheQ7blbT6dHOafNAiS8ooQKA==}
@@ -8026,6 +8035,11 @@ packages:
     engines: {node: '>=0.10.0'}
     dev: true
 
+  /require-from-string@2.0.2:
+    resolution: {integrity: sha512-Xf0nWe6RseziFMu+Ap9biiUbmplq6S9/p+7w7YXP/JBHhrUDDUhwa+vANyubuqfZWTveU//DYVGsDG7RKL/vEw==}
+    engines: {node: '>=0.10.0'}
+    dev: false
+
   /require-main-filename@2.0.0:
     resolution: {integrity: sha512-NKN5kMDylKuldxYLSUfrbo5Tuzh4hd+2E8NPPX02mZtn1VuREQToYe/ZdlJy+J3uCpfaiGF05e7B8W0iXbQHmg==}
     dev: true
@@ -8098,6 +8112,7 @@ packages:
 
   /rimraf@2.6.3:
     resolution: {integrity: sha512-mwqeW5XsA2qAejG46gYdENaxXjx9onRNCfn7L0duuP4hCuTIi/QO7PDK07KJfp1d+izWPrzEJDcSqBa0OZQriA==}
+    deprecated: Rimraf versions prior to v4 are no longer supported
     hasBin: true
     dependencies:
       glob: 7.1.6
@@ -8593,6 +8608,7 @@ packages:
 
   /sudo-prompt@9.2.1:
     resolution: {integrity: sha512-Mu7R0g4ig9TUuGSxJavny5Rv0egCEtpZRNMrZaYS1vxkiIxGiGUwoezU3LazIQ+KE04hTrTfNPgxU5gzi7F5Pw==}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
     dev: true
 
   /supports-color@5.5.0:

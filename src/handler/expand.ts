@@ -235,6 +235,8 @@ type MainStyle = {
   textAlign: string
   lineHeight: number
   letterSpacing: number
+  textFit: string
+  maxFontSize: number
 
   fontFamily: string | string[]
   fontWeight: FontWeight
