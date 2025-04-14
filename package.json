@@ -1,6 +1,6 @@
 {
   "name": "@openbook/satori",
-  "version": "0.0.3-development",
+  "version": "0.0.4-development",
   "description": "Enlightened library to convert HTML and CSS to SVG.",
   "module": "./dist/index.js",
   "main": "./dist/index.js",
