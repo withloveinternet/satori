@@ -3,16 +3,16 @@
  */
 
 import type { ReactNode } from 'react'
-import type { Node as YogaNode } from 'yoga-wasm-web'
-
-import getYoga from './yoga/index.js'
 import {
   isReactElement,
   isClass,
   buildXMLString,
   normalizeChildren,
   hasDangerouslySetInnerHTMLProp,
+  isReactComponent,
+  isForwardRefComponent,
 } from './utils.js'
+import { getYoga, YogaNode } from './yoga.js'
 import { SVGNodeToImage } from './handler/preprocess.js'
 import computeStyle from './handler/compute.js'
 import FontLoader from './font.js'
@@ -79,7 +79,7 @@ export default async function* layout(
   }
 
   // Not a regular element.
-  if (!isReactElement(element) || typeof element.type === 'function') {
+  if (!isReactElement(element) || isReactComponent(element.type)) {
     let iter: ReturnType<typeof layout>
 
     if (!isReactElement(element)) {
@@ -90,11 +90,22 @@ export default async function* layout(
       if (isClass(element.type as Function)) {
         throw new Error('Class component is not supported.')
       }
+
+      let render: Function
+
+      // This is a hack to support React.forwardRef wrapped components.
+      // https://github.com/vercel/satori/issues/600
+      if (isForwardRefComponent(element.type)) {
+        render = (element.type as any).render
+      } else {
+        render = element.type as Function
+      }
+
       // If it's a custom component, Satori strictly requires it to be pure,
       // stateless, and not relying on any React APIs such as hooks or suspense.
       // So we can safely evaluate it to render. Otherwise, an error will be
       // thrown by React.
-      iter = layout((element.type as Function)(element.props), context)
+      iter = layout(await render(element.props), context)
       yield (await iter.next()).value as { word: string; locale?: string }[]
     }
 
@@ -104,7 +115,10 @@ export default async function* layout(
   }
 
   // Process as element.
-  const { type, props } = element
+  const { type: $type, props } = element
+  // type must be a string here.
+  const type = $type as string
+
   if (props && hasDangerouslySetInnerHTMLProp(props)) {
     throw new Error(
       'dangerouslySetInnerHTML property is not supported. See documentation for more information https://github.com/vercel/satori#jsx.'
@@ -159,6 +173,11 @@ export default async function* layout(
     const mutateRefValue = { value: '' } as any
     newInheritableStyle._inheritedBackgroundClipTextPath = mutateRefValue
     computedStyle._inheritedBackgroundClipTextPath = mutateRefValue
+
+    if (computedStyle.backgroundImage) {
+      newInheritableStyle._inheritedBackgroundClipTextHasBackground = 'true'
+      computedStyle._inheritedBackgroundClipTextHasBackground = 'true'
+    }
   }
 
   // 2. Do layout recursively for its children.
@@ -262,10 +281,11 @@ export default async function* layout(
       children &&
       typeof children !== 'string' &&
       display !== 'flex' &&
-      display !== 'none'
+      display !== 'none' &&
+      display !== 'contents'
     ) {
       throw new Error(
-        `Expected <div> to have explicit "display: flex" or "display: none" if it has more than one child node.`
+        `Expected <div> to have explicit "display: flex", "display: contents", or "display: none" if it has more than one child node.`
       )
     }
     baseRenderResult = await rect(

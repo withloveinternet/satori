@@ -18,6 +18,17 @@ export interface FontOptions {
   lang?: string
 }
 
+export type GlyphBox = {
+  x1: number
+  x2: number
+  y1: number
+  y2: number
+}
+type SkipInkBand = {
+  underlineY: number
+  strokeWidth: number
+}
+
 export type FontEngine = {
   has: (s: string) => boolean
   baseline: (s?: string, resolvedFont?: any) => number
@@ -36,8 +47,199 @@ export type FontEngine = {
       top: number
       left: number
       letterSpacing: number
+    },
+    band?: SkipInkBand
+  ) => { path: string; boxes: GlyphBox[] }
+}
+
+type BandPoint = [number, number]
+
+type LineSegment = {
+  from: BandPoint
+  to: BandPoint
+}
+
+function flattenPath(commands: opentype.Path['commands']): LineSegment[] {
+  const segments: LineSegment[] = []
+  let start: BandPoint = [0, 0]
+  let current: BandPoint = [0, 0]
+
+  const addCurve = (points: BandPoint[], steps: number) => {
+    let prev = points[0]
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps
+      const next = evaluateBezier(points, t)
+      segments.push({ from: prev, to: next })
+      prev = next
     }
-  ) => string
+    current = points[points.length - 1]
+  }
+
+  for (const cmd of commands) {
+    if (cmd.type === 'M') {
+      start = current = [cmd.x, cmd.y]
+      continue
+    }
+
+    if (cmd.type === 'L') {
+      const next: BandPoint = [cmd.x, cmd.y]
+      segments.push({ from: current, to: next })
+      current = next
+      continue
+    }
+
+    if (cmd.type === 'Q') {
+      addCurve([current, [cmd.x1, cmd.y1], [cmd.x, cmd.y]], 12)
+      continue
+    }
+
+    if (cmd.type === 'C') {
+      addCurve(
+        [current, [cmd.x1, cmd.y1], [cmd.x2, cmd.y2], [cmd.x, cmd.y]],
+        16
+      )
+      continue
+    }
+
+    if (cmd.type === 'Z') {
+      segments.push({ from: current, to: start })
+      current = start
+    }
+  }
+
+  return segments
+}
+
+function evaluateBezier(points: BandPoint[], t: number): BandPoint {
+  let working = points
+
+  while (working.length > 1) {
+    const next: BandPoint[] = []
+    for (let i = 0; i < working.length - 1; i++) {
+      next.push([
+        working[i][0] + (working[i + 1][0] - working[i][0]) * t,
+        working[i][1] + (working[i + 1][1] - working[i][1]) * t,
+      ])
+    }
+    working = next
+  }
+
+  return working[0]
+}
+
+function computeBandBox(
+  commands: opentype.Path['commands'],
+  band?: SkipInkBand
+): GlyphBox[] {
+  if (!band) return []
+
+  const strokeWidth = band.strokeWidth
+  const bandMin = band.underlineY - strokeWidth * 0.25
+  const bandMax = band.underlineY + strokeWidth * 2.5
+
+  const segments = flattenPath(commands)
+  if (!segments.length) return []
+
+  const bandHeight = bandMax - bandMin
+  const ySamples = Math.max(12, Math.ceil(bandHeight / 0.25))
+  const yStep = bandHeight / ySamples
+  const yStart = bandMin + yStep / 2
+
+  const columnHits = new Set<number>()
+
+  for (let i = 0; i < ySamples; i++) {
+    const y = yStart + yStep * i
+    const intersections: number[] = []
+
+    for (const seg of segments) {
+      const [x1, y1] = seg.from
+      const [x2, y2] = seg.to
+
+      if (y1 === y2) continue
+      const yMin = Math.min(y1, y2)
+      const yMax = Math.max(y1, y2)
+      if (y < yMin || y >= yMax) continue
+
+      const t = (y - y1) / (y2 - y1)
+      const x = x1 + (x2 - x1) * t
+      intersections.push(x)
+    }
+
+    if (!intersections.length) continue
+    intersections.sort((a, b) => a - b)
+
+    for (let j = 0; j < intersections.length - 1; j += 2) {
+      const from = Math.min(intersections[j], intersections[j + 1])
+      const to = Math.max(intersections[j], intersections[j + 1])
+      const start = Math.floor(from)
+      const end = Math.ceil(to)
+      for (let col = start; col < end; col++) {
+        columnHits.add(col)
+      }
+    }
+  }
+
+  if (!columnHits.size) return []
+
+  const columns = Array.from(columnHits.values()).sort((a, b) => a - b)
+  const inkRanges: [number, number][] = []
+
+  let rangeStart = columns[0]
+  let prev = columns[0]
+  for (let i = 1; i < columns.length; i++) {
+    const col = columns[i]
+    if (col > prev + 1) {
+      inkRanges.push([rangeStart, prev + 1])
+      rangeStart = col
+    }
+    prev = col
+  }
+  inkRanges.push([rangeStart, prev + 1])
+
+  const boxes: GlyphBox[] = []
+  const bleed = strokeWidth * 0.6
+  const minX = inkRanges[0][0]
+  const maxX = inkRanges[inkRanges.length - 1][1]
+
+  for (const [x1, x2] of inkRanges) {
+    const left = Math.min(x1, minX) - bleed
+    const right = Math.max(x2, maxX) + bleed
+    boxes.push({
+      x1: left,
+      x2: right,
+      y1: bandMin,
+      y2: bandMax,
+    })
+  }
+
+  return boxes
+}
+
+function computeBoundingBox(
+  commands: opentype.Path['commands']
+): GlyphBox | null {
+  const xs: number[] = []
+  const ys: number[] = []
+
+  for (const cmd of commands) {
+    if ('x' in cmd && typeof cmd.x === 'number') xs.push(cmd.x)
+    if ('y' in cmd && typeof cmd.y === 'number') ys.push(cmd.y)
+    if ('x1' in cmd && typeof cmd.x1 === 'number') xs.push(cmd.x1)
+    if ('y1' in cmd && typeof cmd.y1 === 'number') ys.push(cmd.y1)
+    if ('x2' in cmd && typeof cmd.x2 === 'number') xs.push(cmd.x2)
+    if ('y2' in cmd && typeof cmd.y2 === 'number') ys.push(cmd.y2)
+  }
+
+  if (!xs.length || !ys.length) {
+    return null
+  }
+
+  return {
+    x1: Math.min(...xs),
+    x2: Math.max(...xs),
+    y1: Math.min(...ys),
+    y2: Math.max(...ys),
+  }
 }
 
 function compareFont(
@@ -86,6 +288,11 @@ function compareFont(
 
   return -1
 }
+
+const cachedParsedFont = new WeakMap<
+  Buffer | ArrayBuffer,
+  opentype.Font | null | undefined
+>()
 
 export default class FontLoader {
   defaultFont: opentype.Font
@@ -143,30 +350,37 @@ export default class FontLoader {
         )
       }
       const _lang = lang ?? SUFFIX_WHEN_LANG_NOT_SET
-      const font = opentype.parse(
-        // Buffer to ArrayBuffer.
-        'buffer' in data
-          ? data.buffer.slice(
-              data.byteOffset,
-              data.byteOffset + data.byteLength
-            )
-          : data,
-        // @ts-ignore
-        { lowMemory: true }
-      )
+      let font
 
-      // Modify the `charToGlyphIndex` method, so we can know which char is
-      // being mapped to which glyph.
-      const originalCharToGlyphIndex = font.charToGlyphIndex
-      font.charToGlyphIndex = (char) => {
-        const index = originalCharToGlyphIndex.call(font, char)
-        if (index === 0) {
-          // The current requested char is missing a glyph.
-          if ((font as any)._trackBrokenChars) {
-            ;(font as any)._trackBrokenChars.push(char)
+      if (cachedParsedFont.has(data)) {
+        font = cachedParsedFont.get(data)
+      } else {
+        font = opentype.parse(
+          // Buffer to ArrayBuffer.
+          'buffer' in data
+            ? data.buffer.slice(
+                data.byteOffset,
+                data.byteOffset + data.byteLength
+              )
+            : data,
+          // @ts-ignore
+          { lowMemory: true }
+        )
+        // Modify the `charToGlyphIndex` method, so we can know which char is
+        // being mapped to which glyph.
+        const originalCharToGlyphIndex = font.charToGlyphIndex
+        font.charToGlyphIndex = (char) => {
+          const index = originalCharToGlyphIndex.call(font, char)
+          if (index === 0) {
+            // The current requested char is missing a glyph.
+            if ((font as any)._trackBrokenChars) {
+              ;(font as any)._trackBrokenChars.push(char)
+            }
           }
+          return index
         }
-        return index
+
+        cachedParsedFont.set(data, font)
       }
 
       // We use the first font as the default font fallback.
@@ -183,7 +397,7 @@ export default class FontLoader {
 
   public getEngine(
     fontSize = 16,
-    lineHeight = 1.2,
+    lineHeight: number | string = 'normal',
     {
       fontFamily = 'sans-serif',
       fontWeight = 400,
@@ -314,11 +528,26 @@ export default class FontLoader {
         resolvedFont.ascender
       return (_ascender / resolvedFont.unitsPerEm) * fontSize
     }
+
     const descender = (resolvedFont: opentype.Font, useOS2Table = false) => {
       const _descender =
         (useOS2Table ? resolvedFont.tables?.os2?.sTypoDescender : 0) ||
         resolvedFont.descender
       return (_descender / resolvedFont.unitsPerEm) * fontSize
+    }
+
+    const height = (resolvedFont: opentype.Font, useOS2Table = false) => {
+      if ('string' === typeof lineHeight && 'normal' === lineHeight) {
+        const _lineGap =
+          (useOS2Table ? resolvedFont.tables?.os2?.sTypoLineGap : 0) || 0
+        return (
+          ascender(resolvedFont, useOS2Table) -
+          descender(resolvedFont, useOS2Table) +
+          (_lineGap / resolvedFont.unitsPerEm) * fontSize
+        )
+      } else if ('number' === typeof lineHeight) {
+        return fontSize * lineHeight
+      }
     }
 
     const resolve = (s: string) => {
@@ -340,31 +569,17 @@ export default class FontLoader {
         s?: string,
         resolvedFont = typeof s === 'undefined' ? fonts[0] : resolveFont(s)
       ) => {
-        // https://www.w3.org/TR/css-inline-3/#css-metrics
-        // https://www.w3.org/TR/CSS2/visudet.html#leading
-        // Note. It is recommended that implementations that use OpenType or
-        // TrueType fonts use the metrics "sTypoAscender" and "sTypoDescender"
-        // from the font's OS/2 table for A and D (after scaling to the current
-        // element's font size). In the absence of these metrics, the "Ascent"
-        // and "Descent" metrics from the HHEA table should be used.
-        const A = ascender(resolvedFont, true)
-        const D = descender(resolvedFont, true)
-        const glyphHeight = engine.height(s, resolvedFont)
-        const { yMax, yMin } = resolvedFont.tables.head
+        const asc = ascender(resolvedFont)
+        const desc = descender(resolvedFont)
+        const contentHeight = asc - desc
 
-        const sGlyphHeight = A - D
-        const baselineOffset = (yMax / (yMax - yMin) - 1) * sGlyphHeight
-
-        return glyphHeight * ((1.2 / lineHeight + 1) / 2) + baselineOffset
+        return asc + (height(resolvedFont) - contentHeight) / 2
       },
       height: (
         s?: string,
         resolvedFont = typeof s === 'undefined' ? fonts[0] : resolveFont(s)
       ) => {
-        return (
-          (ascender(resolvedFont) - descender(resolvedFont)) *
-          (lineHeight / 1.2)
-        )
+        return height(resolvedFont)
       },
       measure: (
         s: string,
@@ -382,9 +597,10 @@ export default class FontLoader {
           top: number
           left: number
           letterSpacing: number
-        }
+        },
+        band?: SkipInkBand
       ) => {
-        return this.getSVG(resolveFont, s, style)
+        return this.getSVG(resolveFont, s, style, band)
       },
     }
 
@@ -484,20 +700,72 @@ export default class FontLoader {
       top: number
       left: number
       letterSpacing: number
-    }
-  ) {
+    },
+    band?: SkipInkBand
+  ): { path: string; boxes: GlyphBox[] } {
     const font = resolveFont(content)
     const unpatch = this.patchFontFallbackResolver(font, resolveFont)
 
     try {
       if (fontSize === 0) {
-        return ''
+        return { path: '', boxes: [] }
       }
-      return font
-        .getPath(content.replace(/\n/g, ''), left, top, fontSize, {
-          letterSpacing: letterSpacing / fontSize,
-        })
-        .toPathData(1)
+
+      const fullPath = new opentype.Path()
+      const boxes: GlyphBox[] = []
+
+      const options = {
+        letterSpacing: letterSpacing / fontSize,
+      }
+
+      const cachedPath = new WeakMap<
+        opentype.Glyph,
+        [number, number, opentype.Path]
+      >()
+
+      font.forEachGlyph(
+        content.replace(/\n/g, ''),
+        left,
+        top,
+        fontSize,
+        options,
+        function (glyph, gX, gY, gFontSize) {
+          let glyphPath: opentype.Path
+          if (!cachedPath.has(glyph)) {
+            glyphPath = glyph.getPath(gX, gY, gFontSize, options)
+            cachedPath.set(glyph, [gX, gY, glyphPath])
+          } else {
+            const [_x, _y, _glyphPath] = cachedPath.get(glyph)
+            glyphPath = new opentype.Path()
+            glyphPath.commands = _glyphPath.commands.map((command) => {
+              const movedCommand = { ...command }
+              for (let k in movedCommand) {
+                if (typeof movedCommand[k] === 'number') {
+                  if (k === 'x' || k === 'x1' || k === 'x2') {
+                    movedCommand[k] += gX - _x
+                  }
+                  if (k === 'y' || k === 'y1' || k === 'y2') {
+                    movedCommand[k] += gY - _y
+                  }
+                }
+              }
+              return movedCommand
+            })
+          }
+
+          const bandBoxes = band ? computeBandBox(glyphPath.commands, band) : []
+          if (bandBoxes.length) {
+            boxes.push(...bandBoxes)
+          }
+
+          fullPath.extend(glyphPath)
+        }
+      )
+
+      return {
+        path: fullPath.toPathData(1),
+        boxes,
+      }
     } finally {
       unpatch()
     }
