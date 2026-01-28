@@ -185,13 +185,13 @@ export default async function rect(
   )
 
   // border radius for images with transform property
-  let imageBorderRadius = undefined
+  let imageBorderRadius: string[] | undefined = undefined
 
   // If it's an image (<img>) tag, we add an extra layer of the image itself.
   if (isImage) {
     // Determine the correct preserveAspectRatio setting based on objectPosition
-    let aspectRatioHorizontal = 'xMid'; // Default is center
-    let aspectRatioVertical = 'YMid'; // Default is center
+    let aspectRatioHorizontal = 'xMid' // Default is center
+    let aspectRatioVertical = 'YMid' // Default is center
 
     // We need to subtract the border and padding sizes from the image size.
     const offsetLeft =
