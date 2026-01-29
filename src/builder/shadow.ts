@@ -293,7 +293,7 @@ export function boxShadow(
       buildXMLString(
         'g',
         {
-          mask: `url(#${maskId})`,
+          mask: shadowStyle.inset ? `url(#${maskId})` : undefined,
           filter: `url(#${sid})`,
           opacity: opacity,
         },

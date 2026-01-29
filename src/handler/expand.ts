@@ -222,6 +222,14 @@ function handleSpecialCase(
     return { textDecorationSkipInk: normalized }
   }
 
+  if (name === 'filter') {
+    return { filter: value }
+  }
+
+  if (name === 'boxDecorationBreak' || name === 'WebkitBoxDecorationBreak') {
+    return { boxDecorationBreak: value }
+  }
+
   return
 }
 

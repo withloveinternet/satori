@@ -131,12 +131,12 @@ importers:
       '@babel/runtime':
         specifier: ^7.19.0
         version: 7.22.3
+      '@enter.nl/satori':
+        specifier: workspace:*
+        version: link:..
       '@monaco-editor/react':
         specifier: ^4.4.5
         version: 4.5.1(monaco-editor@0.43.0)(react-dom@17.0.2)(react@17.0.2)
-      '@openbook/satori':
-        specifier: workspace:*
-        version: link:..
       '@resvg/resvg-wasm':
         specifier: ^2.3.1
         version: 2.4.1
@@ -6836,7 +6836,6 @@ packages:
   /metro-react-native-babel-preset@0.76.7(@babel/core@7.22.20):
     resolution: {integrity: sha512-R25wq+VOSorAK3hc07NW0SmN8z9S/IR0Us0oGAsBcMZnsgkbOxu77Mduqf+f4is/wnWHc5+9bfiqdLnaMngiVw==}
     engines: {node: '>=16'}
-    deprecated: Use @react-native/babel-preset instead
     peerDependencies:
       '@babel/core': '*'
     dependencies:

@@ -5,7 +5,7 @@ import radius, { getBorderRadiusClipPath } from './border-radius.js'
 import { boxShadow } from './shadow.js'
 import transform from './transform.js'
 import overflow from './overflow.js'
-import { buildXMLString } from '../utils.js'
+import { buildXMLString, lengthToNumber } from '../utils.js'
 import border, { getBorderClipPath } from './border.js'
 import { genClipPath } from './clip-path.js'
 import buildMaskImage from './mask-image.js'
@@ -44,7 +44,7 @@ export default async function rect(
   let opacity = 1
   let extra = ''
 
-  if (style.backgroundColor) {
+  if (style.backgroundColor && style.boxDecorationBreak !== 'clone') {
     fills.push(style.backgroundColor as string)
   }
 
@@ -135,6 +135,42 @@ export default async function rect(
 
   const { backgroundClip, filter: cssFilter } = style
 
+  let filterUrl = ''
+  if (
+    cssFilter &&
+    typeof cssFilter === 'string' &&
+    cssFilter.startsWith('blur(')
+  ) {
+    const match = cssFilter.match(/blur\(([^)]+)\)/)
+    if (match) {
+      const val = lengthToNumber(
+        match[1],
+        (style.fontSize as number) || 16,
+        0,
+        style,
+        false
+      )
+      if (val) {
+        const filterId = `blur-${id}`
+        defs += buildXMLString(
+          'filter',
+          {
+            id: filterId,
+            x: '-200%',
+            y: '-200%',
+            width: '500%',
+            height: '500%',
+          },
+          buildXMLString('feGaussianBlur', {
+            stdDeviation: val / 1.3,
+            in: 'SourceGraphic',
+          })
+        )
+        filterUrl = `url(#${filterId})`
+      }
+    }
+  }
+
   const currentClipPath =
     backgroundClip === 'text'
       ? `url(#satori_bct-${id})`
@@ -164,7 +200,8 @@ export default async function rect(
         d: path ? path : undefined,
         transform: matrix ? matrix : undefined,
         'clip-path': style.transform ? undefined : currentClipPath,
-        style: cssFilter ? `filter:${cssFilter}` : undefined,
+        filter: filterUrl || undefined,
+        style: !filterUrl && cssFilter ? `filter:${cssFilter}` : undefined,
         mask: style.transform ? undefined : maskId,
       })
     )
@@ -277,7 +314,8 @@ export default async function rect(
       href: src,
       preserveAspectRatio,
       transform: matrix ? matrix : undefined,
-      style: cssFilter ? `filter:${cssFilter}` : undefined,
+      filter: filterUrl || undefined,
+      style: !filterUrl && cssFilter ? `filter:${cssFilter}` : undefined,
       'clip-path': style.transform
         ? imageBorderRadius
           ? `url(#${imageBorderRadius[1]})`
@@ -341,7 +379,12 @@ export default async function rect(
     (shadow ? shadow[0] : '') +
     (imageBorderRadius ? imageBorderRadius[0] : '') +
     clip +
-    (opacity !== 1 ? `<g opacity="${opacity}">` : '') +
+    (shadow ? shadow[1] : '') +
+    (opacity !== 1 || filterUrl
+      ? `<g${opacity !== 1 ? ` opacity="${opacity}"` : ''}${
+          filterUrl ? ` filter="${filterUrl}"` : ''
+        }>`
+      : '') +
     (style.transform && (currentClipPath || maskId)
       ? `<g${currentClipPath ? ` clip-path="${currentClipPath}"` : ''}${
           maskId ? ` mask="${maskId}"` : ''
@@ -349,8 +392,7 @@ export default async function rect(
       : '') +
     (backgroundShapes || shape) +
     (style.transform && (currentClipPath || maskId) ? '</g>' : '') +
-    (opacity !== 1 ? `</g>` : '') +
-    (shadow ? shadow[1] : '') +
+    (opacity !== 1 || filterUrl ? `</g>` : '') +
     extra
   )
 }

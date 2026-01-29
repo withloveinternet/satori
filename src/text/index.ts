@@ -14,6 +14,7 @@ import {
 } from '../utils.js'
 import { getYoga, TYoga, YogaNode } from '../yoga.js'
 import buildText, { container } from '../builder/text.js'
+import radius from '../builder/border-radius.js'
 import { buildDropShadow } from '../builder/shadow.js'
 import buildDecoration from '../builder/text-decoration.js'
 import type { GlyphBox } from '../font.js'
@@ -47,7 +48,11 @@ function isOpaqueWhite(color: string): boolean {
 export default async function* buildTextNodes(
   content: string,
   context: LayoutContext
-): AsyncGenerator<{ word: string; locale?: Locale }[], string, [any, any]> {
+): AsyncGenerator<
+  { word: string; locale?: Locale }[],
+  string,
+  [number, number]
+> {
   const Yoga = await getYoga()
 
   const {
@@ -195,6 +200,7 @@ export default async function* buildTextNodes(
   // Global variables used to compute the text layout.
   // @TODO: Use segments instead of words to properly support kerning.
   let lineWidths = []
+  let lineHeights: number[] = []
   let baselines = []
   let lineSegmentNumber = []
   let texts: string[] = []
@@ -224,6 +230,7 @@ export default async function* buildTextNodes(
 
     baselines = []
     lineWidths = []
+    lineHeights = []
     lineSegmentNumber = [0]
     texts = []
     wordPositionInLayout = []
@@ -285,6 +292,7 @@ export default async function* buildTextNodes(
           // Start a new line, spaces can be ignored.
           lineWidths.push(currentWidth - prevLineEndingSpacesWidth)
           baselines.push(currentBaselineOffset)
+          lineHeights.push(currentLineHeight)
           lines++
           height += currentLineHeight
           currentWidth = 0
@@ -304,6 +312,7 @@ export default async function* buildTextNodes(
 
         lineWidths.push(currentWidth - prevLineEndingSpacesWidth)
         baselines.push(currentBaselineOffset)
+        lineHeights.push(currentLineHeight)
         lines++
         height += currentLineHeight
         currentWidth = w
@@ -392,6 +401,7 @@ export default async function* buildTextNodes(
       }
       lines++
       lineWidths.push(currentWidth)
+      lineHeights.push(currentLineHeight)
       baselines.push(currentBaselineOffset)
     }
 
@@ -421,7 +431,7 @@ export default async function* buildTextNodes(
           parentStyle,
           locale
         )
-        const { width: _currentWidth, height: currentHeight } = flow(
+        const { height: currentHeight } = flow(
           containerWidth,
           testFontSize,
           letterSpacing,
@@ -544,6 +554,7 @@ export default async function* buildTextNodes(
 
   let result = ''
   let backgroundClipDef = ''
+  let backgroundRects = ''
 
   const clipPathId = inheritedStyle._inheritedClipPathId as string | undefined
   const overflowMaskId = inheritedStyle._inheritedMaskId as number | undefined
@@ -662,6 +673,87 @@ export default async function* buildTextNodes(
       }
 
       leftOffset = Math.round(leftOffset)
+    }
+
+    if (
+      parentStyle.boxDecorationBreak === 'clone' &&
+      parentStyle.backgroundColor &&
+      (i === 0 || wordPositionInLayout[i - 1]?.line !== line)
+    ) {
+      const paddingLeft = (parentStyle.paddingLeft as number) || 0
+      const paddingRight = (parentStyle.paddingRight as number) || 0
+      const paddingTop = (parentStyle.paddingTop as number) || 0
+      const paddingBottom = (parentStyle.paddingBottom as number) || 0
+
+      const boxLeft = left + leftOffset - paddingLeft
+      const boxTop = top + topOffset - paddingTop
+      const boxWidth = lineWidths[line] + paddingLeft + paddingRight
+      const boxHeight = lineHeights[line] + paddingTop + paddingBottom
+
+      const bgPath = radius(
+        {
+          left: boxLeft,
+          top: boxTop,
+          width: boxWidth,
+          height: boxHeight,
+        },
+        parentStyle
+      )
+
+      let filterUrl = ''
+      if (
+        parentStyle.filter &&
+        typeof parentStyle.filter === 'string' &&
+        parentStyle.filter.startsWith('blur(')
+      ) {
+        const match = parentStyle.filter.match(/blur\(([^)]+)\)/)
+        if (match) {
+          const val = lengthToNumber(
+            match[1],
+            parentStyle.fontSize || 16,
+            0,
+            parentStyle,
+            false
+          )
+          if (val) {
+            const filterId = `blur-${id}-${line}`
+            backgroundRects += buildXMLString(
+              'defs',
+              {},
+              buildXMLString(
+                'filter',
+                {
+                  id: filterId,
+                  x: '-200%',
+                  y: '-200%',
+                  width: '500%',
+                  height: '500%',
+                },
+                buildXMLString('feGaussianBlur', {
+                  stdDeviation: val / 1.3,
+                  in: 'SourceGraphic',
+                })
+              )
+            )
+            filterUrl = `url(#${filterId})`
+          }
+        }
+      }
+
+      backgroundRects += buildXMLString(bgPath ? 'path' : 'rect', {
+        x: bgPath ? undefined : boxLeft,
+        y: bgPath ? undefined : boxTop,
+        width: bgPath ? undefined : boxWidth,
+        height: bgPath ? undefined : boxHeight,
+        d: bgPath || undefined,
+        fill: parentStyle.backgroundColor as string,
+        transform: matrix || undefined,
+        filter: filterUrl || undefined,
+        style:
+          !filterUrl && parentStyle.filter
+            ? `filter:${parentStyle.filter}`
+            : undefined,
+      })
     }
 
     const baselineOfLine = baselines[line]
@@ -1005,11 +1097,14 @@ export default async function* buildTextNodes(
 
   // Attach information to the parent node.
   if (backgroundClipDef) {
-    ;(parentStyle._inheritedBackgroundClipTextPath as any).value +=
-      backgroundClipDef
+    ;(
+      parentStyle._inheritedBackgroundClipTextPath as unknown as {
+        value: string
+      }
+    ).value += backgroundClipDef
   }
 
-  return result
+  return backgroundRects + result
 }
 
 function createTextContainerNode(Yoga: TYoga, textAlign: string): YogaNode {
