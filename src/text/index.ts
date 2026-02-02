@@ -716,6 +716,12 @@ export default async function* buildTextNodes(
             false
           )
           if (val) {
+            const padding = val * 5
+            const fx = boxLeft - padding
+            const fy = boxTop - padding
+            const fw = boxWidth + 2 * padding
+            const fh = boxHeight + 2 * padding
+
             const filterId = `blur-${id}-${line}`
             backgroundRects += buildXMLString(
               'defs',
@@ -724,13 +730,14 @@ export default async function* buildTextNodes(
                 'filter',
                 {
                   id: filterId,
-                  x: '-200%',
-                  y: '-200%',
-                  width: '500%',
-                  height: '500%',
+                  filterUnits: 'userSpaceOnUse',
+                  x: fx,
+                  y: fy,
+                  width: fw,
+                  height: fh,
                 },
                 buildXMLString('feGaussianBlur', {
-                  stdDeviation: val / 1.3,
+                  stdDeviation: val / 1.2,
                   in: 'SourceGraphic',
                 })
               )
