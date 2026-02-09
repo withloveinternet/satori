@@ -61,7 +61,15 @@ function parsePNG(buf: ArrayBuffer) {
 import { createLRU, parseViewBox } from '../utils.js'
 
 type ResolvedImageData = [string, number?, number?] | readonly []
-export const cache = createLRU<ResolvedImageData>(100)
+// Disabled: global LRU image cache caused memory leaks in long-running server
+// processes — base64 image data accumulated across concurrent requests, causing
+// steady memory growth until the process was killed (OOM).
+// export const cache = createLRU<ResolvedImageData>(100)
+export const cache: ReturnType<typeof createLRU<ResolvedImageData>> = {
+  get: (_key: string) => undefined,
+  set: (_key: string, _value: ResolvedImageData) => {},
+  clear: () => {},
+}
 export const inflightRequests = new Map<string, Promise<ResolvedImageData>>()
 
 const ALLOWED_IMAGE_TYPES = [PNG, APNG, JPEG, GIF, SVG]
@@ -246,7 +254,9 @@ export async function resolveImageData(
     .then((data) => {
       if (typeof data === 'string') {
         try {
-          const newSrc = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(data)))}`
+          const newSrc = `data:image/svg+xml;base64,${btoa(
+            unescape(encodeURIComponent(data))
+          )}`
           // Parse the SVG image size
           const imageSize = parseSvgImageSize(url, data)
           return [newSrc, ...imageSize] as ResolvedImageData
